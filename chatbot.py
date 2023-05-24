@@ -376,11 +376,11 @@ class clarity_chatbot():
         intent = "say_address" if self.current_state=="address" else intent
         
         if (self.current_state=="pizza_flavor" and self.prev_intent!="ask_pizza_toppings") or self.prev_intent in ["ask_pizza_flavor","ask_menu"]:
-            intent = "say_pizza_flavor"
+            intent = "say_pizza_flavor" if intent not in ["affirm", "deny"] else intent
             org_entities = [("pizza_flavor", "philly cheese steak") if item[0]=="name" and item[1]=="philly" else item for item in org_entities]
             org_entities = [("pizza_flavor", "memphis bbq chicken") if item[0]=="menu_item" and item[1]=="chicken" else item for item in org_entities]
         elif self.current_state in ["pizza_toppings","pizza_extra_toppings"] and self.prev_intent!="ask_pizza_flavor":
-            intent = "say_pizza_toppings"
+            intent = "say_pizza_toppings" if intent not in ["affirm", "deny"] else intent
             intent = "say_pizza_toppings" if (len(org_entities)==1 and org_entities[0][0]=="name") else intent
             org_entities = [("pizza_toppings", "philly steak") if item[0]=="name" and item[1]=="philly" else item for item in org_entities]
             org_entities = [("pizza_toppings", "salami") if item[0]=="name" and item[1]=="salami" else item for item in org_entities]
