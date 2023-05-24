@@ -11,8 +11,11 @@ import tensorflow_text
 import tensorflow as tf
 from copy import deepcopy
 import tensorflow_hub as hub
+from flask import Flask, request
 from transformers import pipeline
 from sklearn.preprocessing import LabelBinarizer
+
+app = Flask(__name__)
 
 class clarity_chatbot():
     def __init__(self, intent_classifier_path, intent_labels, ner_model_path, dominos_db):
@@ -50,10 +53,6 @@ class clarity_chatbot():
         self.prev_response = ""
         self.selected_item = ""
         self.prev_intent = ""
-        
-        #Save conversation for testing perpose
-        count = 0
-        self.conversation_file = ""
         
     def clear_pizza_entries(self):
         self.intent = ""
@@ -960,45 +959,90 @@ class clarity_chatbot():
         return " ".join(result)
     
     #Conversation with Chabot
-    def conversation(self):
-        
-        count = len(os.listdir("/home/ai/personal_workspace/kashif/chatbot/test_conversation"))
-        self.conversation_file = f"/home/ai/personal_workspace/kashif/chatbot/test_conversation/{str(count)}.txt"
-        
-        greet=True
-                
-        while self.call_ended!=True:
+    def conversation(self, message):
             
-            if greet==True:
-                print("Hello welcome to dominos pizza. How may I help you?")
-                greet=False
-            
-            message = input("\nNew Message:").lower()
-            message = self.convert_to_digit(message)
-            
-            if len(message)!="" and any(char.isalpha() for char in message):
-                response = self.bot_flow_logic(message)
-                self.prev_intent = self.intent
-                
-                error_list = ["Unfortunately", "I didn't understand", "Your voice has been broken", "You have provided wrong information"]
-                if any(i for i in error_list if i in response):
-                    if self.error_count==3:
-                        self.call_ended=True
-                        response = "I am forwarding your call to the Headquarter. Kindly let them to assist you."
-                    else:
-                        self.error_count+=1
-                else:
-                    prev_intent = response.replace("I didn't understand. Please say that again.","").replace("I didn't understand","").replace("Your voice has been broken.","").replace("You have provided wrong information.","").split("\n")[-1].split(".")[-1].strip()
-                    if prev_intent!="":
-                        self.prev_response = prev_intent
+        message = self.convert_to_digit(message)
 
+        if len(message)!="" and any(char.isalpha() for char in message):
+            response = self.bot_flow_logic(message)
+            self.prev_intent = self.intent
+
+            error_list = ["Unfortunately", "I didn't understand", "Your voice has been broken", "You have provided wrong information"]
+            if any(i for i in error_list if i in response):
+                if self.error_count==3:
+                    self.call_ended=True
+                    response = "I am forwarding your call to the Headquarter. Kindly let them to assist you."
+                else:
+                    self.error_count+=1
             else:
-                response = "Your voice has been broken. Please say that again."
-                
-            print(response)
+                prev_intent = response.replace("I didn't understand. Please say that again.","").replace("I didn't understand","").replace("Your voice has been broken.","").replace("You have provided wrong information.","").split("\n")[-1].split(".")[-1].strip()
+                if prev_intent!="":
+                    self.prev_response = prev_intent
+        else:
+            response = "Your voice has been broken. Please say that again."
+
+        if self.current_state=="order_completed":
+            self.call_ended=True
             
-            if self.current_state=="order_completed":
-                self.call_ended=True
+        return response
+        
+    def load_state(self, session_id):
+        state_file = os.path.join("sessions", f"{session_id}.json")
+        if os.path.exists(state_file):
+            with open(state_file, "r") as f:
+                state = json.load(f)
+            #Here, you would set the internal state based on the loaded state.
+            self.complete_order = state["complete_order"]
+            self.order_details = state["order_details"]
+            self.pizza_list = state["pizza_list"]
+            self.side_item_list = state["side_item_list"]
+            self.begin_pizza_order = state["begin_pizza_order"]
+            self.begin_side_order = state["begin_side_order"]
+            self.comp_pizza_order = state["comp_pizza_order"]
+            self.comp_side_order = state["comp_side_order"]
+            self.error_count = state["error_count"]
+            self.current_state = state["current_state"]
+            self.prev_response = state["prev_response"]
+            self.selected_item = state["selected_item"]
+            self.prev_intent = state["prev_intent"]
+            self.call_ended = state["call_ended"]
+        else:
+            #If the state file doesn't exist, this is a new conversation.
+            self.complete_order = []
+            self.order_details = {"name":"", "delivery_type":"", "payment_method":"", "phone_number":"", "address":""}
+            self.pizza_list = []
+            self.side_item_list = []
+            self.begin_pizza_order = False
+            self.begin_side_order = False
+            self.comp_pizza_order = False
+            self.comp_side_order = True
+            self.error_count = 0
+            self.current_state = ""
+            self.prev_response = ""
+            self.selected_item = ""
+            self.prev_intent = ""
+            self.call_ended = False
+            
+    def save_state(self, session_id):
+        state_file = os.path.join("sessions", f"{session_id}.json")
+        state = {
+            "complete_order": self.complete_order,
+            "order_details": self.order_details,
+            "pizza_list": self.pizza_list,
+            "side_item_list": self.side_item_list,
+            "begin_pizza_order": self.begin_pizza_order,
+            "begin_side_order": self.begin_side_order,
+            "comp_pizza_order": self.comp_pizza_order,
+            "comp_side_order": self.comp_side_order,
+            "error_count": self.error_count,
+            "current_state": self.current_state,
+            "prev_response": self.prev_response,
+            "selected_item": self.selected_item,
+            "prev_intent": self.prev_intent,
+            "call_ended": self.call_ended,
+        }
+        with open(state_file, "w") as f:
+            json.dump(state, f)
 
 
 intent_classifier_path = "/home/ai/personal_workspace/kashif/chatbot/models_v0.2/intent_classification/intent_classifier.h5"
@@ -1011,6 +1055,19 @@ with open(dominos_db_path,"r") as j:
 
 bot_obj = clarity_chatbot(intent_classifier_path, intent_labels, ner_model_path, dominos_db)
 
+@app.route('/message', methods=['POST'])
+def message():
+    session_id = request.json['session_id']
+    user_message = request.json['message']
+
+    bot_obj.load_state(session_id)
+
+    bot_response = bot_obj.conversation(user_message)
+
+    bot_obj.save_state(session_id)
+
+    return {'response': bot_response, 'call_ended': bot.call_ended}
+
 if __name__ == "__main__":
-    bot_obj.conversation()
+    app.run(host="10.103.0.209", port=8890)
 
